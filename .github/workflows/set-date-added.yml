@@ -1,0 +1,34 @@
+name: Auto-add "Date added" field
+
+on:
+  issues:
+    types: [opened]
+
+env:
+  organization: JasonTaylorDevOrg
+  project: 1  # we'll update this next
+
+jobs:
+  add-date:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get current date
+        id: date
+        run: echo "workflow_date=$(date +'%Y-%m-%dT%H:%M:%S%:z')" >> $GITHUB_OUTPUT
+
+      - name: Set "Date added" field in project
+        uses: leonsteinhaeuser/project-beta-automations@v2.1.0
+        with:
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          organization: ${{ env.organization }}
+          project_id: ${{ env.project }}
+          resource_node_id: ${{ github.event.issue.node_id }}
+          operation_mode: custom_field
+          custom_field_values: |
+            [
+              {
+                "name": "Date added",
+                "type": "date",
+                "value": "${{ steps.date.outputs.workflow_date }}"
+              }
+            ]
