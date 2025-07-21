@@ -1,34 +1,57 @@
 name: Auto-add "Date added" field
 
 on:
+  workflow_dispatch:
   issues:
-    types: [opened]
+    types: [edited]
 
 env:
   organization: JasonTaylorDevOrg
-  project: 1  # we'll update this next
+  project: 1
 
 jobs:
   add-date:
     runs-on: ubuntu-latest
     steps:
+      - name: Get project node ID
+        id: project_node_id
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          org="${{ env.organization }}"
+          projectNumber="${{ env.project }}"
+          query='query { organization(login: "'$org'") { projectsV2(first: 20) { nodes { id number title } } } }'
+          result=$(gh api graphql -f query="$query")
+          projectNodeId=$(echo "$result" | jq -r '.data.organization.projectsV2.nodes[] | select(.number == '$projectNumber') | .id')
+          echo "project_node_id=$projectNodeId" >> $GITHUB_OUTPUT
+
+      - name: Output if issue is in project
+        id: issue_is_in_project
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          issueNodeId="${{ github.event.issue.node_id }}"
+          projectId="${{ steps.project_node_id.outputs.project_node_id }}"
+          query=$'query($projectId: ID!) {\n  node(id: $projectId) {\n    ... on ProjectV2 {\n      items(first: 100) {\n        nodes {\n          content {\n            ... on Issue {\n              id\n            }\n          }\n        }\n      }\n    }\n  }\n}'
+          result=$(gh api graphql -F projectId=$projectId -f query="$query")
+          if echo "$result" | grep -q "$issueNodeId"; then
+            echo "issue_is_in_project=true" >> $GITHUB_OUTPUT
+          else
+            echo "issue_is_in_project=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Get current date
+        if: steps.issue_is_in_project.outputs.issue_is_in_project == 'true'
         id: date
         run: echo "workflow_date=$(date +'%Y-%m-%dT%H:%M:%S%:z')" >> $GITHUB_OUTPUT
 
       - name: Set "Date added" field in project
+        if: steps.issue_is_in_project.outputs.issue_is_in_project == 'true'
         uses: leonsteinhaeuser/project-beta-automations@v2.1.0
         with:
-          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          gh_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           organization: ${{ env.organization }}
           project_id: ${{ env.project }}
           resource_node_id: ${{ github.event.issue.node_id }}
           operation_mode: custom_field
-          custom_field_values: |
-            [
-              {
-                "name": "Date added",
-                "type": "date",
-                "value": "${{ steps.date.outputs.workflow_date }}"
-              }
-            ]
+          custom_field_values: '[{\"name\": \"Date Added\", \"type\": \"date\", \"value\": \"${{ steps.date.outputs.workflow_date }}\"}]'
